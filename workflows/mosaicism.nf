@@ -9,9 +9,8 @@ def summary_params = NfcoreSchema.paramsSummaryMap(workflow, params)
 // Validate input parameters
 WorkflowMosaicism.initialise(params, log)
 
-// TODO nf-core: Add all file path parameters for the pipeline to the list below
-// Check input path parameters to see if they exist
-def checkPathParamList = [ params.input, params.multiqc_config, params.fasta , params.fai]
+// Validate paths
+def checkPathParamList = [params.input, params.multiqc_config, params.fasta, params.fai]
 for (param in checkPathParamList) { if (param) { file(param, checkIfExists: true) } }
 
 // Check mandatory parameters
@@ -23,24 +22,24 @@ if (params.chrom_sizes) { ch_chrom_sizes = file(params.chrom_sizes) } else { exi
 if (params.germline_resource) { ch_germline_resource = file(params.germline_resource) } else { exit 1, 'germline_resource VCF file not specified!' }
 if (params.germline_resource_tbi) { ch_germline_resource_tbi = file(params.germline_resource_tbi) } else { exit 1, 'germline_resource TBI file not specified!' }
 
+
+// Parse tools selected
+def tool_list = params.tool ? params.tool.split(",") as List : []
+def selected_tools = tool_list.findAll { it in ["vardict", "varscan", "mutect"] }
+
+
+// Define empty channels first
+ch_vardictjava = Channel.empty()
+ch_varscan = Channel.empty()
+ch_mutect2 = Channel.empty()
+
+
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    CONFIG FILES
+    IMPORT MODULES
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-
-//ch_multiqc_config        = file("$projectDir/assets/multiqc_config.yml", checkIfExists: true)
-//ch_multiqc_custom_config = params.multiqc_config ? Channel.fromPath(params.multiqc_config) : Channel.empty()
-
-/*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    IMPORT LOCAL MODULES/SUBWORKFLOWS
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/
-
-//
-// SUBWORKFLOW: Consisting of a mix of local and nf-core/modules
-//
 
 include { INPUT_CHECK } from '../subworkflows/local/input_check'
 include { VARSCAN_WF } from '../subworkflows/local/varscan_workflow'
@@ -48,140 +47,88 @@ include { PROCESSING_VARSCAN } from '../subworkflows/local/processing_varscan'
 include { BAM_TUMOR_ONLY_SOMATIC_VARIANT_CALLING_GATK } from '../subworkflows/local/bam_tumor_only_somatic_variant_calling_gatk'
 include { MERGE_WORKFLOW } from '../subworkflows/local/merge_workflow'
 
-/*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    IMPORT NF-CORE MODULES/SUBWORKFLOWS
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/
-
-//
-// MODULE: Installed directly from nf-core/modules
-//
-
 include { CUSTOM_DUMPSOFTWAREVERSIONS } from '../modules/nf-core/custom/dumpsoftwareversions/main'
 include { VARDICTJAVA } from '../modules/nf-core/vardictjava/main'
-include { TABIX_BGZIP as TABIX_BGZIP} from "../modules/nf-core/tabix/bgzip/main"
+include { TABIX_BGZIP as TABIX_BGZIP_VARDICTJAVA } from "../modules/nf-core/tabix/bgzip/main"
+include { TABIX_BGZIP as TABIX_BGZIP_JOIN } from "../modules/nf-core/tabix/bgzip/main"
 include { TABIX_TABIX as TABIX_TABIX } from '../modules/nf-core/tabix/tabix/main'
 include { BCFTOOLS_MERGE } from '../modules/nf-core/bcftools/merge/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    RUN MAIN WORKFLOW
+    MAIN WORKFLOW
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
 workflow MOSAICISM {
+    ch_versions = Channel.empty()
 
-  ch_versions = Channel.empty()
- 
+    // Run input validation
+    INPUT_CHECK ( ch_input )
+    ch_versions = ch_versions.mix(INPUT_CHECK.out.versions)
 
-  //
-  // SUBWORKFLOW: Read in samplesheet, validate and stage input files
-  //
-  INPUT_CHECK (
-      ch_input
-  )
-  ch_versions = ch_versions.mix(INPUT_CHECK.out.versions)
+    // Run Vardict
+    if (selected_tools.contains("vardict")) {
+        VARDICTJAVA (
+            INPUT_CHECK.out.reads_bam_bai_bed, 
+            tuple([], ch_fasta), 
+            tuple([], ch_fasta_fai)
+        )
+        ch_versions = ch_versions.mix(VARDICTJAVA.out.versions.first())
 
-  //
-  // SUBWORKFLOW: Run Samtools_sort, Samtools_mpileup and Varscan
-  //
+        TABIX_BGZIP_VARDICTJAVA ( VARDICTJAVA.out.vcf )
+        ch_versions = ch_versions.mix(TABIX_BGZIP_VARDICTJAVA.out.versions.first())
 
-  VARSCAN_WF(
+        TABIX_TABIX ( TABIX_BGZIP_VARDICTJAVA.out.output )
+        ch_versions = ch_versions.mix(TABIX_TABIX.out.versions.first())
+        ch_vardictjava = TABIX_BGZIP_VARDICTJAVA.out.output.join(TABIX_TABIX.out.tbi)
 
-    INPUT_CHECK.out.reads_bam, INPUT_CHECK.out.reads_bed, ch_fasta
+    }
 
-    )
+    // Run Varscan
+    if (selected_tools.contains("varscan")) {
+        VARSCAN_WF ( INPUT_CHECK.out.reads_bam, INPUT_CHECK.out.reads_bed, ch_fasta )
+        ch_versions = ch_versions.mix(VARSCAN_WF.out.ch_versions)
 
-ch_versions = ch_versions.mix(VARSCAN_WF.out.ch_versions)
+        PROCESSING_VARSCAN ( VARSCAN_WF.out.varscan_out )
+        ch_versions = ch_versions.mix(PROCESSING_VARSCAN.out.ch_versions)
 
-  PROCESSING_VARSCAN(
+        ch_varscan = PROCESSING_VARSCAN.out.annotation_out.join(PROCESSING_VARSCAN.out.annotation_tabix)
+    }
 
-  VARSCAN_WF.out.varscan_out
-  )
+    // Run Mutect
+    if (selected_tools.contains("mutect")) {
+        BAM_TUMOR_ONLY_SOMATIC_VARIANT_CALLING_GATK(
+            INPUT_CHECK.out.reads_bam_bai, 
+            Channel.fromPath(ch_fasta).first(), 
+            Channel.fromPath(ch_fasta_fai).first(), 
+            Channel.fromPath(ch_germline_resource).first(), 
+            Channel.fromPath(ch_germline_resource_tbi).first(), 
+            INPUT_CHECK.out.reads_bed
+        )
+        ch_versions = ch_versions.mix(BAM_TUMOR_ONLY_SOMATIC_VARIANT_CALLING_GATK.out.versions.first())
 
-  
-  ch_versions = ch_versions.mix(PROCESSING_VARSCAN.out.ch_versions)
+        ch_mutect2 = BAM_TUMOR_ONLY_SOMATIC_VARIANT_CALLING_GATK.out.mutect2_vcf.join(BAM_TUMOR_ONLY_SOMATIC_VARIANT_CALLING_GATK.out.mutect2_index)
+    }
 
-  
-//
-  // SUBWORKFLOW: Run Mutect2 and related software
-  //
-  BAM_TUMOR_ONLY_SOMATIC_VARIANT_CALLING_GATK(
-    INPUT_CHECK.out.reads_bam_bai, Channel.fromPath(ch_fasta).first(), Channel.fromPath(ch_fasta_fai).first(), Channel.fromPath(ch_germline_resource).first(), Channel.fromPath(ch_germline_resource_tbi).first(), INPUT_CHECK.out.reads_bed
-  )
-  
-  
- 
+    
+// Merge channels using `.groupTuple()`
 
+ch_merged_input = ch_vardictjava.mix(ch_varscan).mix(ch_mutect2).groupTuple()
 
-
-  ch_versions = ch_versions.mix(BAM_TUMOR_ONLY_SOMATIC_VARIANT_CALLING_GATK.out.versions.first())
-
-
-
-
-  //
-  // MODULE: Run Vardictjava
-  //
-
-
-
-
-  VARDICTJAVA (
-    INPUT_CHECK.out.reads_bam_bai_bed, tuple([],ch_fasta), tuple([],ch_fasta_fai)
-  )
+// Print for debugging
 
 
-
-  ch_versions = ch_versions.mix(VARDICTJAVA.out.versions.first())
-
-  //ch_versions.mix(VARDICTJAVA.out.versions.first().view())
-  //ch_versions.mix(VARDICTJAVA.out.versions.view())
-
-  TABIX_BGZIP (
-        VARDICTJAVA.out.vcf
-    )
-
-   
-   ch_versions = ch_versions.mix(TABIX_BGZIP.out.versions.first())
-
-
-
-   // MODULE: Run tabix
-
-   TABIX_TABIX (
-       TABIX_BGZIP.out.output
-   )
-
-   
-
-ch_versions = ch_versions.mix(TABIX_TABIX.out.versions.first())
-  
-
-ch_vardictjava=TABIX_BGZIP.out.output.join(TABIX_TABIX.out.tbi)
-ch_varscan=PROCESSING_VARSCAN.out.annotation_out.join(PROCESSING_VARSCAN.out.annotation_tabix)
-ch_mutect2=BAM_TUMOR_ONLY_SOMATIC_VARIANT_CALLING_GATK.out.mutect2_vcf.join(BAM_TUMOR_ONLY_SOMATIC_VARIANT_CALLING_GATK.out.mutect2_index)
-
-  // Include BCFTOOLS_MERGE process
-
-
-
- MERGE_WORKFLOW (
- ch_vardictjava,
- ch_varscan,
-ch_mutect2
-
-)
-
-
-ch_versions = ch_versions.mix(MERGE_WORKFLOW.out.versions)
-
-
-
+// Run MERGE_WORKFLOW if multiple tools were used
+if (selected_tools.size() > 1) {
+    MERGE_WORKFLOW(ch_merged_input)
+    ch_versions = ch_versions.mix(MERGE_WORKFLOW.out.versions)
+    
+    TABIX_BGZIP_JOIN ( MERGE_WORKFLOW.out.merge_vcf )
+    ch_versions = ch_versions.mix(TABIX_BGZIP_JOIN.out.versions.first())
 }
 
-
+}
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
