@@ -1,7 +1,7 @@
 include { SAMTOOLS_SORT } from '../../modules/nf-core/samtools/sort/main'
 include { SAMTOOLS_MPILEUP } from '../../modules/nf-core/samtools/mpileup/main'
 include { VARSCAN } from '../../modules/local/varscan/main'
-include { TABIX_BGZIP } from "../../modules/nf-core/tabix/bgzip/main"
+include { TABIX_BGZIP} from "../../modules/nf-core/tabix/bgzip/main"
 
 workflow VARSCAN_WF {
 

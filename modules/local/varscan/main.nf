@@ -23,6 +23,10 @@ process VARSCAN {
 
     """
         varscan mpileup2snp ${mpileup} --min-var-freq 0.05 --p-value 1 --output-vcf 1 > ${prefix}_varscan.vcf
+        
+        # Replace the sample name in the VCF with "${prefix}_varscan"
+        sed -i 's/Sample1/Varscan/' ${prefix}_varscan.vcf
+
         cat <<-END_VERSIONS > versions.yml
         #"${task.process}":
         #varscan: \$(echo \$(varscan --version 2>&1) | sed 's/^.*varscan //; s/Using.*\$//' ))
