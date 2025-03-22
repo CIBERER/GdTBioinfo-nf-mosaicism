@@ -59,6 +59,8 @@ include { MERGE_WORKFLOW } from '../subworkflows/local/merge_workflow'
 //
 
 include { CUSTOM_DUMPSOFTWAREVERSIONS } from '../modules/nf-core/custom/dumpsoftwareversions/main'
+include { BWA_INDEX } from '../moduoles/nf-core/bwa/index/main'
+include { PIDARD_CREATESEQUENCEDICTIONARY } '../modules/nf-core/picard/createsequencedictionary/main'
 include { VARDICTJAVA } from '../modules/nf-core/vardictjava/main'
 include { TABIX_BGZIP as TABIX_BGZIP} from "../modules/nf-core/tabix/bgzip/main"
 include { TABIX_TABIX as TABIX_TABIX } from '../modules/nf-core/tabix/tabix/main'
@@ -82,6 +84,24 @@ workflow MOSAICISM {
       ch_input
   )
   ch_versions = ch_versions.mix(INPUT_CHECK.out.versions)
+
+  if (params.index) { 
+    ch_index = tuple([],file(params.index))
+   } else {
+    BWA_INDEX(
+        tuple([], ch_fasta)
+    )
+    ch_index = BWA_INDEX.out.index
+   }
+
+   if (params.refdict) {
+    ch_refdict = tuple([],file(params.refdict))
+   } else {
+    PIDARD_CREATESEQUENCEDICTIONARY (
+        tuple([], ch_fasta)
+    )
+    ch_refdict = PIDARD_CREATESEQUENCEDICTIONARY.out.reference_dict
+   }
 
   //
   // SUBWORKFLOW: Run Samtools_sort, Samtools_mpileup and Varscan
