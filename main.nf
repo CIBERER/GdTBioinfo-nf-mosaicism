@@ -20,6 +20,9 @@ nextflow.enable.dsl = 2
 params.fasta = WorkflowMain.getGenomeAttribute(params, 'fasta')
 params.fai = WorkflowMain.getGenomeAttribute(params, 'fai')
 
+//params.known_snps              = WorkflowMain.getGenomeAttribute('known_snps')
+//params.known_snps_tbi          = WorkflowMain.getGenomeAttribute('known_snps_tbi')
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     VALIDATE & PRINT PARAMETER SUMMARY

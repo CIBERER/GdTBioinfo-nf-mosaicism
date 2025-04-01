@@ -22,6 +22,10 @@ if (params.fai) { ch_fasta_fai = file(params.fai) } else { exit 1, 'Fai file not
 if (params.chrom_sizes) { ch_chrom_sizes = file(params.chrom_sizes) } else { exit 1, 'chrom.sizes file not specified!' }
 if (params.germline_resource) { ch_germline_resource = file(params.germline_resource) } else { exit 1, 'germline_resource VCF file not specified!' }
 if (params.germline_resource_tbi) { ch_germline_resource_tbi = file(params.germline_resource_tbi) } else { exit 1, 'germline_resource TBI file not specified!' }
+ch_known_sites = params.known_snps            ? Channel.fromPath(params.known_snps).collect()              : Channel.value([])
+ch_known_sites_tbi = params.known_snps_tbi ? Channel.fromPath(params.known_snps_tbi) : Channel.empty()
+
+//ch_intervals = params.intervals ? Channel.fromPath(params.intervals).map{ it -> [ [id:it.baseName], it ] }.collect() : Channel.value("")
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -43,6 +47,7 @@ if (params.germline_resource_tbi) { ch_germline_resource_tbi = file(params.germl
 //
 
 include { INPUT_CHECK } from '../subworkflows/local/input_check'
+include { MAPPING } from '../subworkflows/local/mapping'
 include { VARSCAN_WF } from '../subworkflows/local/varscan_workflow'
 include { PROCESSING_VARSCAN } from '../subworkflows/local/processing_varscan'
 include { BAM_TUMOR_ONLY_SOMATIC_VARIANT_CALLING_GATK } from '../subworkflows/local/bam_tumor_only_somatic_variant_calling_gatk'
@@ -86,22 +91,39 @@ workflow MOSAICISM {
   ch_versions = ch_versions.mix(INPUT_CHECK.out.versions)
 
   if (params.index) { 
-    ch_index = tuple([],file(params.index))
-   } else {
+        ch_index = Channel.fromPath(params.index).map{ it -> [ [id:it.baseName], it ] }.collect() 
+    } else {
     BWA_INDEX(
-        tuple([], ch_fasta)
+        ch_fasta
     )
     ch_index = BWA_INDEX.out.index
    }
 
-   if (params.refdict) {
-    ch_refdict = tuple([],file(params.refdict))
-   } else {
+   if (params.refdict) { 
+        ch_refdict = Channel.fromPath(params.refdict).map{ it -> [ [id:it.baseName], it ] }.collect() 
+    } else { 
     PIDARD_CREATESEQUENCEDICTIONARY (
         tuple([], ch_fasta)
     )
     ch_refdict = PIDARD_CREATESEQUENCEDICTIONARY.out.reference_dict
    }
+
+    //
+    // SUBWORKFLOW: Align raw reads
+    //
+
+    ch_intervals = params.intervals ? INPUT_CHECK.out.reads.map{ meta, fastqs -> tuple(meta, file(params.intervals)) } : INPUT_CHECK.out.reads.map{ meta, fastqs -> tuple(meta, []) }
+
+    MAPPING (
+        INPUT_CHECK.out.reads,
+        ch_index,
+        ch_fasta,
+        ch_fai,
+        ch_refdict,
+        ch_intervals,
+        ch_known_sites,
+        ch_known_sites_tbi
+    )
 
   //
   // SUBWORKFLOW: Run Samtools_sort, Samtools_mpileup and Varscan
