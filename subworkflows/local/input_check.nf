@@ -2,16 +2,15 @@
 // Check input samplesheet and get read, sample, and case channels
 //
 
-include { SAMPLESHEET_CHECK } from '../../modules/local/samplesheet_check'
+include { samplesheetToList } from 'plugin/nf-schema'
 
 workflow INPUT_CHECK {
     take:
         samplesheet // file: /path/to/samplesheet.csv
 
     main:
-    canal_sp = SAMPLESHEET_CHECK ( samplesheet )
-        .csv
-        .splitCsv ( header:true, sep:',' ) // canal donde cada elemento es una fila del csv
+
+    canal_sp = Channel.fromList(samplesheetToList(samplesheet, "assets/schema_input.json"))
 
     canal_sp
         .map {create_bam_bai_bed_channel(it)}
@@ -36,87 +35,48 @@ workflow INPUT_CHECK {
     reads_bam // channel: [ meta, [ bam ] ]
     reads_bam_bai // channel: [ meta, [ bam, bai ] ]
     reads_bed // channel: [ meta, [ bed ] ]
-    versions = SAMPLESHEET_CHECK.out.versions // channel: [ versions.yml ]
+    versions = Channel.empty() // SAMPLESHEET_CHECK.out.versions // channel: [ versions.yml ]
 
 }
 
 //Function to get list of [ meta, [ bam, bai, bed] ]
 
-def create_bam_bai_bed_channel(LinkedHashMap row) {
-    // create meta map
-    def meta = [:]
-    meta.id         = row.sample
+def create_bam_bai_bed_channel(ArrayList row) {
+    // gather meta
+    meta = row.get(0)
 
-    // add path(s) of the bam/bai files to the meta map
-    def bam_meta = []
-    if (!file(row.bam).exists()) {
-        exit 1, "ERROR: Please check input samplesheet -> Bam file does not exist!\n${row.bam}"
-    }
-
-    if (!file(row.bai).exists()) {
-        exit 1, "ERROR: Please check input samplesheet -> Bam.bai file does not exist!\n${row.bai}"
-    }
-
-    if (!file(row.bed).exists()) {
-        exit 1, "ERROR: Please check input samplesheet -> Bed file does not exist!\n${row.bed}"
-    }
-
-    bam_meta = [ meta, file(row.bam), file(row.bai), file(row.bed) ]
-    //bam_meta = [ meta, [ file(row.bam)] ]
+    // add path(s) of the bam/bai/bed files to the meta map
+    bam_meta = [ meta, file(row.get(1)), file(row.get(2)), file(row.get(3)) ]
 
     return bam_meta
 }
 
-def create_bam_channel(LinkedHashMap row) {
-    // create meta map
-    def meta = [:]
-    meta.id         = row.sample
+def create_bam_channel(ArrayList row) {
+    // gather meta
+    meta = row.get(0)
 
-    // add path(s) of the bam/bai files to the meta map
-    def bam_meta = []
-    if (!file(row.bam).exists()) {
-        exit 1, "ERROR: Please check input samplesheet -> Bam file does not exist!\n${row.bam}"
-    }
-
-    bam_meta = [ meta, file(row.bam) ]
-    //bam_meta = [ meta, [ file(row.bam)] ]
+    // add path(s) of the bam files to the meta map
+    bam_meta = [ meta, file(row.get(1)) ]
 
     return bam_meta
 }
 
-def create_bam_bai_channel(LinkedHashMap row) {
-    // create meta map
-    def meta = [:]
-    meta.id         = row.sample
+def create_bam_bai_channel(ArrayList row) {
+    // gather meta
+    meta = row.get(0)
 
     // add path(s) of the bam/bai files to the meta map
-    def bam_meta = []
-    if (!file(row.bam).exists()) {
-        exit 1, "ERROR: Please check input samplesheet -> Bam file does not exist!\n${row.bam}"
-    }
-
-    if (!file(row.bai).exists()) {
-        exit 1, "ERROR: Please check input samplesheet -> Bam.bai file does not exist!\n${row.bai}"
-    }
-
-    bam_bai_meta = [ meta, file(row.bam), file(row.bai) ]
+    bam_bai_meta = [ meta, file(row.get(1)), file(row.get(2)) ]
 
     return bam_bai_meta
 }
 
-def create_bed_channel(LinkedHashMap row) {
-    // create meta map
-    def meta = [:]
-    meta.id         = row.sample
+def create_bed_channel(ArrayList row) {
+    // gather meta
+    meta = row.get(0)
 
-    // add path(s) of the bam/bai files to the meta map
-
-    if (!file(row.bed).exists()) {
-        exit 1, "ERROR: Please check input samplesheet -> Bed file does not exist!\n${row.bed}"
-    }
-
-    bed_meta = [ meta, file(row.bed) ]
-    //bam_meta = [ meta, [ file(row.bam)] ]
+    // add path(s) of the bed files to the meta map
+    bed_meta = [ meta, file(row.get(3)) ]
 
     return bed_meta
 }
