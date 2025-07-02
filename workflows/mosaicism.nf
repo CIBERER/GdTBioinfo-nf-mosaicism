@@ -64,11 +64,11 @@ include { MERGE_WORKFLOW } from '../subworkflows/local/merge_workflow'
 //
 
 include { CUSTOM_DUMPSOFTWAREVERSIONS } from '../modules/nf-core/custom/dumpsoftwareversions/main'
-include { BWA_INDEX } from '../moduoles/nf-core/bwa/index/main'
-include { PIDARD_CREATESEQUENCEDICTIONARY } '../modules/nf-core/picard/createsequencedictionary/main'
+include { BWA_INDEX } from '../modules/nf-core/bwa/index/main'
+include { PICARD_CREATESEQUENCEDICTIONARY } from '../modules/nf-core/picard/createsequencedictionary/main'
 include { VARDICTJAVA } from '../modules/nf-core/vardictjava/main'
-include { TABIX_BGZIP as TABIX_BGZIP} from "../modules/nf-core/tabix/bgzip/main"
-include { TABIX_TABIX as TABIX_TABIX } from '../modules/nf-core/tabix/tabix/main'
+include { TABIX_BGZIP } from "../modules/nf-core/tabix/bgzip/main"
+include { TABIX_TABIX } from '../modules/nf-core/tabix/tabix/main'
 include { BCFTOOLS_MERGE } from '../modules/nf-core/bcftools/merge/main'
 
 /*
@@ -102,10 +102,10 @@ workflow MOSAICISM {
    if (params.refdict) { 
         ch_refdict = Channel.fromPath(params.refdict).map{ it -> [ [id:it.baseName], it ] }.collect() 
     } else { 
-    PIDARD_CREATESEQUENCEDICTIONARY (
+    PICARD_CREATESEQUENCEDICTIONARY (
         tuple([], ch_fasta)
     )
-    ch_refdict = PIDARD_CREATESEQUENCEDICTIONARY.out.reference_dict
+    ch_refdict = PICARD_CREATESEQUENCEDICTIONARY.out.reference_dict
    }
 
     //
